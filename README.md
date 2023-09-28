@@ -1,3 +1,4 @@
+![saucelogo](https://github.com/ErroneousCreationist/Sauce-Engine/assets/76930150/4d53e12a-c559-4c1b-84a9-721e553bcaba)
 # Sauce-Engine
 A wrapper for Pygame and Pymunk that makes it much quicker to make multi-scene projects with animations and physics and the like.
 
