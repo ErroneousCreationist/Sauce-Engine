@@ -205,6 +205,7 @@ class AnimationController:
         self.animations:list[Animation] = animations
         self.attached:GraphicalObject = None
         self.playonstart = playonstart
+        self.currframe = None
     def init(self, attached):
         self.attached = attached
         for i in self.animations:
@@ -221,19 +222,20 @@ class AnimationController:
         self.playing = False
     def update(self):
         if self.playing:
-            currframe = None
             for i in self.currentlyplaying.animationframes:
-                if self.animt > i.start and self.animt < i.end:
-                    currframe = i
-            if currframe != None:
-                if currframe.rotation:
-                    self.attached.rotation = currframe.rotation
-                if currframe.scale:
-                    self.attached.setscale(currframe.scale)
-                if currframe.offset:
-                    self.attached.offset = currframe.offset
-                if currframe.sprite:
-                    self.attached.sprite = currframe.sprite
+                if self.animt > i.start and self.animt < i.end and self.currframe != i:
+                    self.currframe = i
+                    if self.currframe.event:
+                        self.currframe.event()
+            if self.currframe != None:
+                if self.currframe.rotation:
+                    self.attached.rotation = self.currframe.rotation
+                if self.currframe.scale:
+                    self.attached.setscale(self.currframe.scale)
+                if self.currframe.offset:
+                    self.attached.offset = self.currframe.offset
+                if self.currframe.sprite:
+                    self.attached.sprite = self.currframe.sprite
             self.animt+=1/self.attached.scene.TheGame.fps
             if self.animt > self.currentlyplaying.totallength:
                 self.currentlyplaying = None
@@ -257,7 +259,7 @@ class AnimationController:
         if self.idleframe.sprite:
             self.attached.sprite = self.idleframe.sprite
     def returncopy(self):
-        return AnimationController(self.idleanimation, self.animations)  
+        return AnimationController(self.idleframe, self.animations, self.playonstart)  
     
 class Animation:
     def __init__(self, frames, totallength) -> None:
@@ -265,12 +267,14 @@ class Animation:
         self.totallength = totallength
 
 class AnimationFrame:
-    def __init__(self, start, end, rotation=None, scale=None, offset=None, sprite=None) -> None:
+    def __init__(self, start, end, rotation=None, scale=None, offset=None, sprite=None, event=None) -> None:
+        """The event parameter should be a function that takes one parameter, being the object that the animator is on."""
         self.rotation = rotation
         self.scale = scale
         self.offset = offset
         self.sprite = sprite
         self.start = start
+        self.event = event
         self.end = end
 
 #collider types
@@ -419,10 +423,12 @@ class Game:
         self.display = pygame.display.set_mode((self.display_width, self.display_height))
         pygame.display.set_caption(caption)
         self.crashed = False
+        self.gametime = 0
         self.scenes:list[Scene] = scenes
         self.currentscene:Scene = None
         self.loadscene(0)
         self.currentevents = None
+        self.deltatime = 0.1
         try:
             pygame.mixer.init()
         except pygame.error:
@@ -441,6 +447,16 @@ class Game:
         position = position - Scaleoffset
         position = position+offset
         self.display.blit(rotatedimg, (round(position[0]), round(position[1])))
+
+    def DrawImageRaw(self, image, position):
+        """Draw an image to the display"""
+        # we need to rotate 180 degrees because of the y coordinate flip
+        self.display.blit(image, (round(position[0]), round(position[1])))
+
+    def DrawImageRawOffset(self, image, position, offset):
+        """Draw an image to the display"""
+        # we need to rotate 180 degrees because of the y coordinate flip
+        self.display.blit(image, (round(position[0]+offset[0]), round(position[1]+offset[1])))
 
     def GetAnyKeyDown(self):
         for i in self.currentevents:
@@ -495,6 +511,17 @@ class Game:
     
     def GetMousePosition(self):
         return pygame.mouse.get_pos()
+    
+    def GetMouseMoving(self):
+        """Note, this returns the mouses position if it moves"""
+        for i in self.currentevents:
+            if i.type == pygame.MOUSEMOTION:
+                return i.pos 
+        return None
+    
+    def GetNormalisedMousePosition(self):
+        """This returns the mouse position, X divided by SCREEN WIDTH, Y divided by SCREEN HEIGHT"""
+        return (pygame.mouse.get_pos()[0] / self.display_width, pygame.mouse.get_pos()[1] / self.display_height)
 
     def DrawCircle(self, colour, position, radius, width=0, draw_topleft=True, draw_topright=True, draw_bottomleft=True, draw_bottomright=True):
         pygame.draw.circle(self.display, colour, position, radius, width, draw_topright, draw_topleft, draw_bottomleft, draw_bottomright)
@@ -520,7 +547,8 @@ class Game:
             self.display.fill(self.currentscene.backgroundcol)
             self.currentscene.gameloop()
             pygame.display.flip()
-            self.clock.tick(self.fps)
+            self.gametime += 1/self.fps
+            self.deltatime = self.clock.tick(self.fps)
         pygame.quit()
         quit()
 
@@ -570,6 +598,18 @@ def StopMusic():
         print("AUDIO NOT INIT")
         return
     pygame.mixer_music.stop()
+
+def ReMap(value, minInput, maxInput, minOutput, maxOutput):
+
+	value = maxInput if value > maxInput else value
+	value = minInput if value < minInput else value
+
+	inputSpan = maxInput - minInput
+	outputSpan = maxOutput - minOutput
+
+	scaledThrust = float(value - minInput) / float(inputSpan)
+
+	return minOutput + (scaledThrust * outputSpan)
 
 #constant colours
 White = (255,255,255)
