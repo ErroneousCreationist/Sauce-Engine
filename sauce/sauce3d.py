@@ -2,9 +2,11 @@ from sauce import sauce
 #import sauce
 import math
 import pygame
+import os
+import json
 
 _ = False
-"""A false value for making maps easier"""
+"""A false value for making maps in code easier"""
 ExampleMap = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1],
     [1,_,_,_,_,_,_,_,_,1,_,_,1],
@@ -155,6 +157,9 @@ class Player3D(sauce.UpdatableDestroyable):
         #we have to be in a 3d scene
         if type(self.scene) != "Scene3D":
             self.destroy()
+        self.generateRaycaster(playersettings)
+        
+    def generateRaycaster(self, playersettings):
         self.raycaster = Raycaster(self.scene.TheGame, self, playersettings.fov, playersettings.maxdepth)
 
     def checkCollision(self, pos) -> bool:
@@ -262,6 +267,7 @@ class Raycaster():
                     offset * (self.texsize - self.scale), 0, self.scale, self.texsize
                 )
                 wall_column = pygame.transform.scale(wall_column, (self.scale, proj_height))
+                #wall_column.fill((min(255*(depth/self.maxdepth), 255), min(255,255*(depth/self.maxdepth)), min(255,255*(depth/self.maxdepth))), special_flags=pygame.BLEND_SUB) 
                 wall_pos = (ray * self.scale, self.half_height - proj_height // 2+self.yoffset)
                 self.objects_to_render.append((depth, wall_column, wall_pos))
                 #self.game.DrawImageRaw(wall_column, wall_pos)
@@ -271,6 +277,7 @@ class Raycaster():
                     offset * (self.texsize - self.scale), self.halftexsize - texture_height // 2, self.scale, texture_height
                 )
                 wall_column = pygame.transform.scale(wall_column, (self.scale, displayheight))
+                #wall_column.fill((min(255*(depth/self.maxdepth), 255), min(255,255*(depth/self.maxdepth)), min(255,255*(depth/self.maxdepth))), special_flags=pygame.BLEND_SUB) 
                 wall_pos = (ray*self.scale, 0+self.yoffset)
                 self.objects_to_render.append((depth, wall_column, wall_pos))
                 #self.game.DrawImageRaw(wall_column, wall_pos)
@@ -283,20 +290,25 @@ class Raycaster():
     
     def drawbackground(self):
         bgimg:pygame.Surface = self.player.scene.backgroundimage
-        self.skyoffset = ((self.skyoffset-self.prevsky) + 4.0 * (self.player.rotation)) % self.game.display_width
+        self.skyoffset = ((self.skyoffset-self.prevsky) + 4.0 * (self.player.rotation*4)) % self.game.display_width
         
         self.game.DrawImageRawOffset(bgimg, (0, 0), (-self.skyoffset, 0))
         self.game.DrawImageRawOffset(bgimg, (0, 0), (-self.skyoffset + self.game.display_width, 0))
 
-        self.game.DrawRect(self.player.scene.floorcol, pygame.Rect(0, self.game.display_height/2, self.game.display_width, self.game.display_height))
+        self.game.DrawRect(self.player.scene.floorcol, pygame.Rect(0, self.game.display_height/2+self.yoffset, self.game.display_width, self.game.display_height-self.yoffset))
         self.prevsky = self.skyoffset
 
     def ray_cast(self):
         self.ray_casting_result = []
-        ray_angle = math.radians(self.player.rotation) - self.half_FOV +0.0001
+        origrayangle = math.radians(self.player.rotation) - self.half_FOV +0.0001
+        ray_angle = origrayangle
+        maxangle = math.radians(self.player.rotation) + self.half_FOV +0.0001
+        xx = 0
+        xxstep = self.game.display_width / self.num_rays
         ox,oy = self.player.position
         x_map,y_map = self.player.map_pos
         texture_vert, texture_hor = 1,1
+        
 
         for ray in range(self.num_rays):
             sin_a = math.sin(ray_angle)
@@ -357,8 +369,9 @@ class Raycaster():
             #colour = (col,col,col)
             #self.game.DrawRect(colour, 
                                #pygame.Rect(ray * self.scale, self.half_height - proj_height//2 + self.yoffset, self.scale, proj_height))
-
             ray_angle += self.deltaangle
+            #ray_angle = origrayangle + math.atan(math.radians(xx/self.FOV))
+            #xx += xxstep
     def update(self):
         self.ray_cast()
         self.drawbackground()
@@ -368,9 +381,12 @@ class Scene3D(sauce.Scene):
     def __init__(self, gravity, game, map:list[list[bool]], playersettings:PlayerSettings, backgroundimage, walltextures, wallimgsize = 256, floorcol = sauce.Grey) -> None:
         self.map = map
         self.realmap = {}
+        self.inaccessibletiles = {}
         for i, row in enumerate(map):
             for j, value in enumerate(row):
-                if value != 0:
+                if value == -1:
+                    self.inaccessibletiles[(i,j)] = value
+                if value > 0:
                     self.realmap[(i,j)] = value
         
         self.rows = len(map)
@@ -391,12 +407,20 @@ class Scene3D(sauce.Scene):
         super().__init__(gravity, game, floorcol)
 
     def loadthisscene(self):
-        self.player = self.spawn(Player3D("Player", self, self.playersettings))
+        self.createplayer()
         super().loadthisscene()
-
+    def createplayer(self):
+        self.player = self.spawn(Player3D("Player", self, self.playersettings))
     def gameloop(self):
         #for i in self.realmap.keys():
             #self.TheGame.DrawSquare(sauce.White, (i[0]*100, i[1]*100), 100, 100)
-        pygame.display.set_caption(str(self.player.map_pos))
         super().gameloop()
 
+def LoadMapFile(startingpath, assetname) -> [[]]:
+    """Set the starting path to __file__ and the assetname to the map file's name (including extension). This loads map files from the JSON folder. Do make sure all textures from this map exist and are loaded in your scene3d."""
+    startingpath = os.path.dirname(startingpath)
+    f = open(os.path.join(os.path.join(os.path.join(startingpath,"assets"), "json"), assetname))
+    st = f.read()
+    f.close()
+    dict = json.loads(st)
+    return dict["map"]

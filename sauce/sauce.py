@@ -14,6 +14,9 @@ class UpdatableDestroyable:
         self.rotation = rotation
         self.scale = scale
         self.scene:Scene = theScene
+        self.active = True
+    def setactive(self, value:bool):
+        self.active = value
     def earlyUpdate(self):
         pass
     def lateUpdate(self):
@@ -32,14 +35,11 @@ class GraphicalObject(UpdatableDestroyable):
         self.sprite = sprite
         self.layer = layer
         self.offset = offset
-        self.active = True
         self.animator:AnimationController = anim
         if self.animator:
             self.animator.init(self)
     def setscale(self, scale):
         self.scale = scale
-    def setactive(self, value:bool):
-        self.active = value
     def update(self):
         super().update()
         if self.layer == 1:
@@ -153,8 +153,9 @@ class Button(TextRendererUI):
 
 class InputField(TextRendererUI):
     currselected=None
-    def __init__(self, name, pos, rotation, scale, theScene, font, fontsize, col, action, autocorrectlist=None, defaulttext = "", maxcharacters = 20, autocorrectlabelcol = None, bgcolSelected = None, offset = (0,0), anim = None) -> None:
+    def __init__(self, name, pos, rotation, scale, theScene, font, fontsize, col, action, autocorrectlist=None, defaulttext = "", maxcharacters = 20, autocorrectlabelcol = None, bgcolSelected = None,bgcol = None, bannedchars = [], offset = (0,0), anim = None) -> None:
         super().__init__(name, pos, rotation, scale, theScene, font, fontsize, defaulttext, col, None, offset, anim)
+        self.normalbgcol = bgcol
         self.user_text = defaulttext
         self.action = action
         self.autocorrectlist=autocorrectlist
@@ -165,6 +166,7 @@ class InputField(TextRendererUI):
         self.maxcharacters = maxcharacters
         self.autocorrectlabelcol = autocorrectlabelcol
         self.defaulttext = defaulttext
+        self.bannedchars = bannedchars
         if self.autocorrectlist != None:
             self.autocorrectlabel = self.scene.spawn(TextRenderer(self.name+"_label", self.position, self.rotation, self.scale, self.scene, self.currfont, self.currfontsize, "", autocorrectlabelcol, None, None, None))
     def onkeypress(self):
@@ -174,26 +176,37 @@ class InputField(TextRendererUI):
                 continue
             if k.key == pygame.K_DELETE or k.key == pygame.K_BACKSPACE:
                 self.user_text = self.user_text[:-1]
+                self.rect = self.textimg.get_rect()
+                self.rect.center = self.position
             elif k.key == pygame.K_KP_ENTER or k.key == pygame.K_RETURN:
                 InputField.currselected = None
-            elif len(self.user_text) < self.maxcharacters:
+                self.rect = self.textimg.get_rect()
+                self.rect.center = self.position
+            elif len(self.user_text) < self.maxcharacters and not k.key in self.bannedchars:
                 self.user_text += k.unicode
+                self.rect = self.textimg.get_rect()
+                self.rect.center = self.position
         if self.autocorrectlist:
             closest = difflib.get_close_matches(self.user_text, possibilities=self.autocorrectlist, n=1)
             if len(closest) > 0:
                 self.autocorrectlabel.edit(closest[0])
         self.action(self,self.user_text)
+        
     def earlyUpdate(self):
-        self.rect = self.textimg.get_rect()
+        
         self.rect.center = self.position
-        self.rect.w = max(100, self.currtextimg.get_rect().width+10)
+        self.rect.w = max(50, self.textimg.get_rect().w+10)
         if self.scene.TheGame.GetMouseDown(1):
-            if self.rect.collidepoint(self.scale.TheGame.GetMousePosition()):
+            if self.rect.collidepoint(self.scene.TheGame.GetMousePosition()):
                 InputField.currselected = self
-        if self.scene.TheGame.GetAnyKeyDown():
+        if InputField.currselected == self and self.scene.TheGame.GetAnyKeyDown():
             self.onkeypress()
         self.edit(self.user_text)
-        self.scene.TheGame.DrawRect(self.bgcolSelected if InputField.currselected ==self else self.bgcol, self.rect)
+        if self.normalbgcol != None:
+             self.scene.TheGame.DrawRect(self.bgcolSelected if InputField.currselected ==self else self.normalbgcol, self.rect)
+        else:
+            if InputField.currselected == self:
+                 self.scene.TheGame.DrawRect(self.bgcolSelected, self.rect)
         super().earlyUpdate()
     def returncopy(self, name, pos, scene):
         return InputField(name, pos, self.rotation, self.scale, scene, self.currfont, self.currfontsize, self.currcol, self.action, self.autocorrectlist, self.defaulttext, self.maxcharacters, self.autocorrectlabelcol, self.bgcolSelected, self.offset, self.animator.returncopy() if self.animator else None)
@@ -375,6 +388,7 @@ class Scene:
         self.gravity = gravity
         self.TheGame:Game = game
         self.backgroundcol = backgroundcol
+        self.mouseOverUi = False
     def loadthisscene(self):
         self.space = pymunk.Space()
         self.space.gravity = self.gravity
@@ -390,11 +404,23 @@ class Scene:
     def gameloop(self):
         """A single loop of the game"""
         for i in self.objects:
+            if not i.active:
+                continue
             i.earlyUpdate()
         for i in self.objects:
+            if not i.active:
+                continue
             i.update()
         for i in self.objects:
+            if not i.active:
+                continue
             i.lateUpdate()
+        #get mouse over ui
+        for i in self.objects:
+            if i is InputField and i.rect.collidepoint(self.TheGame.GetMousePosition()):
+                self.mouseOverUi = True
+            if i is Button and i.rect.collidepoint(self.TheGame.GetMousePosition()):
+                self.mouseOverUi = True    
         self.space.step(1/self.TheGame.fps)
     def exitscene(self):
         self.objects = []
@@ -428,7 +454,8 @@ class Game:
         self.currentscene:Scene = None
         self.loadscene(0)
         self.currentevents = None
-        self.deltatime = 0.1
+        self.deltatime = 100
+        self.deltatimeseconds = self.deltatime/1000
         try:
             pygame.mixer.init()
         except pygame.error:
@@ -499,13 +526,15 @@ class Game:
                 return True
         return False
     
-    def GetMouseUp(self, button = 0):
+    def GetMouseUp(self, button = 1):
+        """BUTTON 1 IS LMB, BUTTON 2 IS RMB"""
         for i in self.currentevents:
             if i.type == pygame.MOUSEBUTTONUP and i.button == button:
                 return True
         return False
 
     def GetMouse(self, button = 0):
+        """BUTTON 0 IS LMB, BUTTON 1 IS RMB"""
         pressed = pygame.mouse.get_pressed()
         return pressed[button]
     
@@ -532,6 +561,9 @@ class Game:
     def DrawSquare(self, colour, position, width, height, thick=0):
         pygame.draw.rect(self.display, colour, pygame.Rect(position[0]-width/2, position[1]-height/2, width, height), thick)
 
+    def DrawLine(self, start, end, colour, width):
+        pygame.draw.line(self.display, colour, start, end, width)
+
     def loadscene(self, index):
         if self.currentscene:
             self.currentscene.exitscene()
@@ -549,6 +581,7 @@ class Game:
             pygame.display.flip()
             self.gametime += 1/self.fps
             self.deltatime = self.clock.tick(self.fps)
+            self.deltatimeseconds = self.deltatime/1000
         pygame.quit()
         quit()
 
@@ -569,32 +602,32 @@ def FindAsset(assettype, startingpath, assetname) -> pygame.mixer.Sound or pygam
         case 2:
             return pygame.image.load(os.path.join(os.path.join(os.path.join(startingpath,"assets"), "images"), assetname))
         case 3:
-            f = open(pygame.image.load(os.path.join(os.path.join(os.path.join(startingpath,"assets"), "images"), assetname)))
+            f = open(os.path.join(os.path.join(os.path.join(startingpath,"assets"), "json"), assetname))
             st = f.read()
             f.close()
             return json.loads(st)
     
 def PlaySound(sound, loops = 0, ):
-    if pygame.mixer.get_init != True:
+    if pygame.mixer.get_init == True:
         print("AUDIO NOT INIT")
         return
     s:pygame.mixer.Sound = sound
     s.play(loops=loops)
 
 def SetCurrentMusic(music:str):
-    if pygame.mixer.get_init != True:
+    if pygame.mixer.get_init == True:
         print("AUDIO NOT INIT")
         return
     pygame.mixer_music.load(music)
 
 def PlayMusic(fadeS = 0):
-    if pygame.mixer.get_init != True:
+    if pygame.mixer.get_init == True:
         print("AUDIO NOT INIT")
         return
     pygame.mixer_music.play(fade_ms=fadeS*1000)
 
 def StopMusic():
-    if pygame.mixer.get_init != True:
+    if pygame.mixer.get_init == True:
         print("AUDIO NOT INIT")
         return
     pygame.mixer_music.stop()
